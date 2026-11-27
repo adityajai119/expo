@@ -250,12 +250,23 @@ function validateFlavoredFramework(framework) {
  */
 const frameworkSources = new WeakMap();
 
+const RELEASE_STUB_FLAVOR = 'release-stub';
+
 /**
  * Returns null when this module has no precompiled artifact at all. Once any
  * flavor is present, both are mandatory at the same source base; a partial
  * build must not silently degrade to a one-flavor declaration.
+ *
+ * With `preferReleaseStub`, Release links the empty stub the same base holds beside the real
+ * Release, if it holds one.
  */
-function resolveFlavoredFramework({ packageName, moduleRoot, frameworkName, cacheDir }) {
+function resolveFlavoredFramework({
+  packageName,
+  moduleRoot,
+  frameworkName,
+  cacheDir,
+  preferReleaseStub = false,
+}) {
   for (const base of artifactBases(packageName, moduleRoot)) {
     const sources = Object.fromEntries(
       FLAVORS.map((flavor) => [flavor, existingArtifactSource(base.dir, flavor, frameworkName)])
@@ -271,6 +282,9 @@ function resolveFlavoredFramework({ packageName, moduleRoot, frameworkName, cach
         });
       }
     }
+    const releaseStub = preferReleaseStub
+      ? existingArtifactSource(base.dir, RELEASE_STUB_FLAVOR, frameworkName)
+      : null;
     const framework = validateFlavoredFramework({
       id: stableFrameworkId(frameworkName),
       frameworkName,
@@ -278,11 +292,11 @@ function resolveFlavoredFramework({ packageName, moduleRoot, frameworkName, cach
       flavors: {
         debug: prepareArtifactSource(sources.debug, packageName, frameworkName, cacheDir, 'debug'),
         release: prepareArtifactSource(
-          sources.release,
+          releaseStub ?? sources.release,
           packageName,
           frameworkName,
           cacheDir,
-          'release'
+          releaseStub != null ? RELEASE_STUB_FLAVOR : 'release'
         ),
       },
     });

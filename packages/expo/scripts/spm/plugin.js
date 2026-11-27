@@ -462,6 +462,7 @@ function buildFromSourceMatcher(patterns) {
  *   a pattern matches it.
  */
 function linkPrecompiledPods(identities, records, cacheDir, matchBuildFromSource, fallbackPods) {
+  const releaseStubbed = podsOnlyDebugOnlyModulesUse(identities);
   const matchesByPod = new Map();
   for (const identity of identities.values()) {
     if (fallbackPods.has(identity.podName) || identity.debugOnly) continue;
@@ -487,7 +488,11 @@ function linkPrecompiledPods(identities, records, cacheDir, matchBuildFromSource
       }
       continue;
     }
-    const framework = resolveFlavoredFramework({ ...lookup, cacheDir });
+    const framework = resolveFlavoredFramework({
+      ...lookup,
+      cacheDir,
+      preferReleaseStub: releaseStubbed.has(identity.podName),
+    });
     if (framework == null) {
       if (fallbackPods.has(identity.podName)) {
         const entry = fallbackPods.get(identity.podName);
@@ -499,6 +504,38 @@ function linkPrecompiledPods(identities, records, cacheDir, matchBuildFromSource
     linked.push(record);
   }
   return linked;
+}
+
+/**
+ * The pods that are not debug-only and that only debug-only modules depend on, directly or
+ * through other pods of the app, so Release can link their empty stub. A dependent without
+ * native sources, such as a podspec-only umbrella, links nothing and does not count.
+ */
+function podsOnlyDebugOnlyModulesUse(identities) {
+  const dependentsByPod = new Map();
+  for (const identity of identities.values()) {
+    for (const dependency of identity.podspec.dependencies) {
+      const podName = dependency.split('/')[0];
+      if (!dependentsByPod.has(podName)) dependentsByPod.set(podName, []);
+      dependentsByPod.get(podName).push(identity);
+    }
+  }
+  const pods = new Set();
+  for (const { podName, debugOnly } of identities.values()) {
+    if (debugOnly) continue;
+    const dependents = new Set();
+    const pending = [podName];
+    while (pending.length > 0) {
+      for (const dependent of dependentsByPod.get(pending.pop()) ?? []) {
+        if (dependent.podName === podName || dependents.has(dependent)) continue;
+        dependents.add(dependent);
+        pending.push(dependent.podName);
+      }
+    }
+    const users = [...dependents].filter((dependent) => dependent.sources.hasSources);
+    if (users.length > 0 && users.every((user) => user.debugOnly)) pods.add(podName);
+  }
+  return pods;
 }
 
 /**

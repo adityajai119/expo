@@ -263,6 +263,69 @@ describe('artifact preparation', () => {
     ).toBe(true);
   });
 
+  describe('with a Release stub', () => {
+    const output = () => path.join(root, 'test-package', 'output');
+    const resolve = (preferReleaseStub) =>
+      resolveFlavoredFramework({
+        packageName: 'test-package',
+        moduleRoot: path.join(root, 'module'),
+        frameworkName: 'ExpoPair',
+        cacheDir: path.join(root, 'cache'),
+        preferReleaseStub,
+      });
+    const cached = (folder) =>
+      path.join(root, 'cache', 'expo-pair', folder, 'ExpoPair.xcframework');
+    const header = (xcframework) =>
+      fs.readFileSync(
+        path.join(xcframework, 'ios-arm64', 'ExpoPair.framework', 'Headers', 'ExpoPair.h'),
+        'utf8'
+      );
+
+    function packFlavor(base, flavor) {
+      const source = path.join(root, `source-${flavor}`);
+      makeXcframework(source, 'ExpoPair', flavor);
+      packTarball(
+        path.join(source, flavor),
+        path.join(base, flavor, 'xcframeworks', 'ExpoPair.tar.gz'),
+        ['ExpoPair.xcframework']
+      );
+    }
+
+    const placeFlavor = (base, flavor) =>
+      makeXcframework(path.join(base, flavor), 'ExpoPair', 'xcframeworks', flavor);
+
+    itNotWindows('links the stub as Release when asked, and Debug as before', () => {
+      for (const flavor of ['debug', 'release', 'release-stub']) packFlavor(output(), flavor);
+      expect(resolve(true).flavors).toEqual({
+        debug: cached('debug'),
+        release: cached('release-stub'),
+      });
+      expect(header(cached('release-stub'))).toBe('release-stub');
+    });
+
+    itNotWindows('extracts the stub and the real Release to separate cache folders', () => {
+      for (const flavor of ['debug', 'release', 'release-stub']) packFlavor(output(), flavor);
+      expect(resolve(true).flavors.release).toBe(cached('release-stub'));
+      expect(resolve(false).flavors.release).toBe(cached('release'));
+      expect(resolve(true).flavors.release).toBe(cached('release-stub'));
+      expect(header(cached('release'))).toBe('release');
+      expect(header(cached('release-stub'))).toBe('release-stub');
+    });
+
+    it('links the real Release when no stub was built', () => {
+      placeFlavor(output(), 'debug');
+      const release = placeFlavor(output(), 'release');
+      expect(resolve(true).flavors.release).toBe(release);
+    });
+
+    it('links the real Release when only another base has a stub', () => {
+      placeFlavor(output(), 'debug');
+      const release = placeFlavor(output(), 'release');
+      placeFlavor(path.join(root, 'module', 'prebuilds', 'output'), 'release-stub');
+      expect(resolve(true).flavors.release).toBe(release);
+    });
+  });
+
   it('rejects a tarball holding an entry outside an xcframework root', () => {
     const output = path.join(root, 'test-package', 'output');
     for (const flavor of FLAVORS) {

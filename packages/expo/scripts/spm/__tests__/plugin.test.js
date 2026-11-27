@@ -1725,6 +1725,95 @@ describe('a debug-only module', () => {
   });
 });
 
+describe('a precompiled module other modules depend on', () => {
+  captureConsole({ each: true });
+
+  afterEach(restoreModuleMocks);
+
+  /**
+   * Syncs a precompiled ExpoHelper beside `dependents`, each `{ podName, dependsOn, debugOnly,
+   * sources }`, every pod precompiled. Returns whether the sync asked for each package's
+   * Release stub, by package name.
+   */
+  function sync(dependents) {
+    const tmp = makeTempDir('expo-spm-release-stub-');
+    const core = pureSwiftModule(path.join(tmp, 'expo-modules-core'), 'ExpoModulesCore', spec());
+    const helper = pureSwiftModule(path.join(tmp, 'expo-helper'), 'ExpoHelper', spec());
+    const modules = dependents.map(({ podName, dependsOn, debugOnly = false, sources = true }) => {
+      const packageName = `package-${podName}`;
+      const moduleRoot = path.join(tmp, packageName);
+      const podspec = spec(...dependsOn.map((dependency) => `  s.dependency '${dependency}'`));
+      let podspecDir = moduleRoot;
+      if (sources) {
+        podspecDir = pureSwiftModule(moduleRoot, podName, podspec);
+      } else {
+        fs.mkdirSync(moduleRoot, { recursive: true });
+        fs.writeFileSync(path.join(moduleRoot, 'package.json'), '{"name":"module"}');
+        fs.writeFileSync(path.join(moduleRoot, `${podName}.podspec`), podspec);
+      }
+      return [packageName, [[podName, podspecDir]], { debugOnly }];
+    });
+    resolveExpoModules.mockReturnValue(
+      modulesOf([coreAt(core), ['expo-helper', [['ExpoHelper', helper]]], ...modules])
+    );
+    resolveFlavoredFramework.mockImplementation(({ frameworkName }) => ({
+      id: frameworkName,
+      frameworkName,
+    }));
+    providerWrittenTo(path.join(tmp, 'out'));
+    expect(thrownBy(() => runPlugin(tmp))).toBeNull();
+    return Object.fromEntries(
+      resolveFlavoredFramework.mock.calls.map(([args]) => [
+        args.packageName,
+        args.preferReleaseStub,
+      ])
+    );
+  }
+
+  const devLauncher = { podName: 'DevLauncher', dependsOn: ['ExpoHelper'], debugOnly: true };
+  const devMenu = { podName: 'DevMenu', dependsOn: ['ExpoHelper'], debugOnly: true };
+
+  it('asks for its Release stub when only debug-only modules depend on it', () => {
+    const stubbed = sync([devLauncher, devMenu]);
+    expect(stubbed['expo-helper']).toBe(true);
+    expect(stubbed['package-DevLauncher']).toBe(false);
+    expect(stubbed['expo-modules-core']).toBe(false);
+  });
+
+  it('asks for its real Release when a module that is not debug-only depends on a subspec of it', () => {
+    const stubbed = sync([
+      devLauncher,
+      { podName: 'Updates', dependsOn: ['ExpoHelper/Core'], debugOnly: false },
+    ]);
+    expect(stubbed['expo-helper']).toBe(false);
+  });
+
+  it('ignores a dependent without native sources', () => {
+    const stubbed = sync([
+      devLauncher,
+      { podName: 'DevClient', dependsOn: ['ExpoHelper', 'DevLauncher'], sources: false },
+    ]);
+    expect(stubbed['expo-helper']).toBe(true);
+  });
+
+  it('asks for its real Release when a module that is not debug-only depends on it through a debug-only one', () => {
+    const stubbed = sync([devLauncher, { podName: 'App', dependsOn: ['DevLauncher'] }]);
+    expect(stubbed['expo-helper']).toBe(false);
+  });
+
+  it('asks for its real Release when no module depends on it', () => {
+    expect(sync([])['expo-helper']).toBe(false);
+  });
+
+  it('follows a dependency cycle among its dependents once', () => {
+    const stubbed = sync([
+      { ...devLauncher, dependsOn: ['ExpoHelper', 'DevMenu'] },
+      { ...devMenu, dependsOn: ['DevLauncher'] },
+    ]);
+    expect(stubbed['expo-helper']).toBe(true);
+  });
+});
+
 describe('what a discarded round of the passes emitted', () => {
   captureConsole({ each: true });
 
