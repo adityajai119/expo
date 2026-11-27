@@ -4,6 +4,7 @@
 
 #ifdef __cplusplus
 
+#include <cstdlib>
 #include <cstring>
 #include <new>
 #include <TargetConditionals.h>
@@ -470,7 +471,71 @@ class PointerValueAccess : public jsi::Runtime {
   static jsi::String borrowString(const jsi::Value &value) noexcept {
     return make<jsi::String>(const_cast<PointerValue *>(getPointerValue(value)));
   }
+
+  /**
+   A `jsi::Object` holding the pointer of the given object value without cloning it. Must live in
+   raw storage that is never destroyed, like `borrowString`.
+   */
+  static jsi::Object borrowObject(const jsi::Value &value) noexcept {
+    return make<jsi::Object>(const_cast<PointerValue *>(getPointerValue(value)));
+  }
+
+#if EXPO_JSI_HAS_RN_086
+  static jsi::TypedArray borrowTypedArray(const jsi::Object &object) noexcept {
+    return make<jsi::TypedArray>(const_cast<PointerValue *>(getPointerValue(object)));
+  }
+#endif
 } __attribute__((availability(swift, unavailable)));
+
+inline bool isTypedArrayValue([[maybe_unused]] jsi::IRuntime &runtime, [[maybe_unused]] const jsi::Value &value) {
+#if EXPO_JSI_HAS_RN_086
+  if (!value.isObject()) {
+    return false;
+  }
+  alignas(jsi::Object) unsigned char storage[sizeof(jsi::Object)];
+  const jsi::Object *object = new (storage) jsi::Object(PointerValueAccess::borrowObject(value));
+  return runtime.isTypedArray(*object);
+#else
+  std::abort();
+#endif
+}
+
+/**
+ * If `value` is a `Uint8Array` (RN 0.86+), invokes `callback` with its raw data pointer and byte
+ * length while keeping its backing `ArrayBuffer` alive, and returns `true`. Otherwise returns `false`
+ * without calling `callback`. Avoids handle clones and JS property lookups entirely.
+ */
+inline bool withUint8ArrayBytes(
+  [[maybe_unused]] jsi::IRuntime &runtime,
+  [[maybe_unused]] const jsi::Value &value,
+  [[maybe_unused]] void *ctx,
+  [[maybe_unused]] void (*callback)(void *_Nonnull ctx, const uint8_t *_Nullable data, size_t byteLength)
+) {
+#if EXPO_JSI_HAS_RN_086
+  if (!value.isObject()) {
+    return false;
+  }
+  alignas(jsi::Object) unsigned char objStorage[sizeof(jsi::Object)];
+  const jsi::Object *object = new (objStorage) jsi::Object(PointerValueAccess::borrowObject(value));
+  if (!runtime.isUint8Array(*object)) {
+    return false;
+  }
+  alignas(jsi::TypedArray) unsigned char taStorage[sizeof(jsi::TypedArray)];
+  const jsi::TypedArray *ta = new (taStorage) jsi::TypedArray(PointerValueAccess::borrowTypedArray(*object));
+  size_t byteLength = runtime.byteLength(*ta);
+  if (byteLength == 0) {
+    callback(ctx, nullptr, 0);
+    return true;
+  }
+  size_t byteOffset = runtime.byteOffset(*ta);
+  jsi::ArrayBuffer buffer = runtime.buffer(*ta);
+  uint8_t *base = buffer.data(runtime);
+  callback(ctx, base != nullptr ? base + byteOffset : nullptr, byteLength);
+  return true;
+#else
+  std::abort();
+#endif
+}
 
 /**
  Same as `getStringData`, but reads the string straight from a string `jsi::Value`. `value.getString(runtime)`
@@ -512,6 +577,13 @@ inline void setExternalMemoryPressure(jsi::IRuntime &runtime, const jsi::Object 
  */
 inline jsi::Value valueFromArrayBuffer(jsi::IRuntime &runtime, const jsi::ArrayBuffer &arrayBuffer) {
   return jsi::Value(runtime, arrayBuffer);
+}
+
+/**
+ * Clones an existing `jsi::ArrayBuffer` handle without going through a JS property lookup.
+ */
+inline jsi::ArrayBuffer cloneArrayBuffer(jsi::IRuntime &runtime, const jsi::ArrayBuffer &arrayBuffer) {
+  return jsi::Value(runtime, arrayBuffer).getObject(runtime).getArrayBuffer(runtime);
 }
 
 /**
@@ -558,16 +630,6 @@ inline jsi::Value createUint8Array(
   uint8_t *_Nullable *_Nonnull data
 ) {
   return expo::CppError::tryCatch(runtime, [&] {
-#if defined(REACT_NATIVE_VERSION_MAJOR) && defined(REACT_NATIVE_VERSION_MINOR) && \
-    (REACT_NATIVE_VERSION_MAJOR > 0 || REACT_NATIVE_VERSION_MINOR >= 86)
-    // Up to 8 KB, an array that the runtime allocates is faster: it needs no native buffer, finalizer or
-    // memory report. The runtime zeroes the memory first, though, and above that size this costs more.
-    if (size <= 8 * 1024) {
-      jsi::Uint8Array array(runtime, size);
-      *data = array.buffer(runtime).data(runtime);
-      return jsi::Value(std::move(array));
-    }
-#endif
     // The memory is reported only after the `Uint8Array` exists. A report can start a young-generation
     // collection at the next allocation, and the buffer that this function holds would survive it and
     // move to the old generation, which a slower collection frees.
@@ -579,6 +641,27 @@ inline jsi::Value createUint8Array(
     }
     return array;
   });
+}
+
+/**
+ * Fast path for creating a small `Uint8Array` (<= 8 KB) directly via JSI without looking up the
+ * global `Uint8Array` constructor. Only call when `hasNativeTypedArraySupport()` is `true` and
+ * `size <= 8 * 1024`.
+ */
+inline jsi::Value createNativeSmallUint8Array(
+  [[maybe_unused]] jsi::IRuntime &runtime,
+  [[maybe_unused]] size_t size,
+  [[maybe_unused]] uint8_t *_Nullable *_Nonnull data
+) {
+#if EXPO_JSI_HAS_RN_086
+  return expo::CppError::tryCatch(runtime, [&] {
+    jsi::Uint8Array array(runtime, size);
+    *data = array.buffer(runtime).data(runtime);
+    return jsi::Value(std::move(array));
+  });
+#else
+  std::abort();
+#endif
 }
 
 /**
