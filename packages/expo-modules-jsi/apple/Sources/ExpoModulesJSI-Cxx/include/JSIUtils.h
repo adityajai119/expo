@@ -191,6 +191,12 @@ inline jsi::ArrayBuffer arrayBufferFromValue(jsi::IRuntime &runtime, const jsi::
   return value.getObject(runtime).getArrayBuffer(runtime);
 }
 
+// Moves the `jsi::String` out of the temporary value returned by `getValueAtIndex`, skipping the
+// handle clone that Swift's `const&` call to `getString` performs.
+inline jsi::String stringAtIndex(jsi::IRuntime &runtime, const jsi::Array &array, size_t index) {
+  return array.getValueAtIndex(runtime, index).getString(runtime);
+}
+
 inline const jsi::Value valueFromError(jsi::IRuntime &runtime, const jsi::JSError &error) {
   return jsi::Value(runtime, error.value());
 }
@@ -470,7 +476,33 @@ class PointerValueAccess : public jsi::Runtime {
   static jsi::String borrowString(const jsi::Value &value) noexcept {
     return make<jsi::String>(const_cast<PointerValue *>(getPointerValue(value)));
   }
+
+  /**
+   A `jsi::Object` holding the pointer of the given object value without cloning it. Must live in
+   raw storage that is never destroyed, like `borrowString`.
+   */
+  static jsi::Object borrowObject(const jsi::Value &value) noexcept {
+    return make<jsi::Object>(const_cast<PointerValue *>(getPointerValue(value)));
+  }
 } __attribute__((availability(swift, unavailable)));
+
+/**
+ Returns the enumerable property names of an object `jsi::Value` without cloning its object handle.
+ */
+inline jsi::Array getPropertyNamesOfObjectValue(jsi::IRuntime &runtime, const jsi::Value &value) {
+  alignas(jsi::Object) unsigned char storage[sizeof(jsi::Object)];
+  const jsi::Object *object = new (storage) jsi::Object(PointerValueAccess::borrowObject(value));
+  return object->getPropertyNames(runtime);
+}
+
+/**
+ Reads property `name` from an object `jsi::Value` without cloning its object handle.
+ */
+inline jsi::Value getPropertyOfObjectValue(jsi::IRuntime &runtime, const jsi::Value &value, const jsi::String &name) {
+  alignas(jsi::Object) unsigned char storage[sizeof(jsi::Object)];
+  const jsi::Object *object = new (storage) jsi::Object(PointerValueAccess::borrowObject(value));
+  return object->getProperty(runtime, name);
+}
 
 /**
  Same as `getStringData`, but reads the string straight from a string `jsi::Value`. `value.getString(runtime)`
