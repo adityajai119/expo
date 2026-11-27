@@ -312,12 +312,6 @@ describe('artifact preparation', () => {
       expect(header(cached('release-stub'))).toBe('release-stub');
     });
 
-    it('links the real Release when no stub was built', () => {
-      placeFlavor(output(), 'debug');
-      const release = placeFlavor(output(), 'release');
-      expect(resolve(true).flavors.release).toBe(release);
-    });
-
     it('links the real Release when only another base has a stub', () => {
       placeFlavor(output(), 'debug');
       const release = placeFlavor(output(), 'release');

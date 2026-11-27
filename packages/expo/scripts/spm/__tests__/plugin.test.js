@@ -1801,6 +1801,14 @@ describe('a precompiled module other modules depend on', () => {
     expect(stubbed['expo-helper']).toBe(false);
   });
 
+  it('asks for its real Release when a module that is not debug-only depends on it through one without native sources', () => {
+    const stubbed = sync([
+      { podName: 'DevClient', dependsOn: ['ExpoHelper'], sources: false },
+      { podName: 'App', dependsOn: ['DevClient'] },
+    ]);
+    expect(stubbed['expo-helper']).toBe(false);
+  });
+
   it('asks for its real Release when no module depends on it', () => {
     expect(sync([])['expo-helper']).toBe(false);
   });
