@@ -212,7 +212,7 @@ public struct JavaScriptValue: JavaScriptType, Sendable, ~Copyable {
     guard let jsiRuntime else {
       FatalError.runtimeLost()
     }
-    return pointee.getObject(jsiRuntime).isArray(jsiRuntime)
+    return expo.isArrayValue(jsiRuntime, pointee)
   }
 
   public func isFunction() -> Bool {
@@ -223,7 +223,7 @@ public struct JavaScriptValue: JavaScriptType, Sendable, ~Copyable {
     guard let jsiRuntime else {
       FatalError.runtimeLost()
     }
-    return pointee.getObject(jsiRuntime).isFunction(jsiRuntime)
+    return expo.isFunctionValue(jsiRuntime, pointee)
   }
 
   /// Whether the value is a thenable: an object with a callable `then`, such as a promise.
@@ -260,7 +260,7 @@ public struct JavaScriptValue: JavaScriptType, Sendable, ~Copyable {
     guard let jsiRuntime else {
       FatalError.runtimeLost()
     }
-    return pointee.getObject(jsiRuntime).isArrayBuffer(jsiRuntime)
+    return expo.isArrayBufferValue(jsiRuntime, pointee)
   }
 
   /// Checks whether the value is an instance of a global class of the given name.
@@ -398,7 +398,7 @@ public struct JavaScriptValue: JavaScriptType, Sendable, ~Copyable {
     }
     assert(isArray(), "Value is not an array")
     assert(runtime?.isOnOwningThread() ?? true, "A JavaScript value was copied off its runtime's JavaScript thread")
-    return JavaScriptArray(runtimeHandle, pointee.getObject(jsiRuntime).getArray(jsiRuntime))
+    return JavaScriptArray(runtimeHandle, expo.arrayFromValue(jsiRuntime, pointee))
   }
 
   /// Returns the value as a function, or asserts if not a function.
@@ -535,11 +535,10 @@ public struct JavaScriptValue: JavaScriptType, Sendable, ~Copyable {
   /// Throws `TypeError` if the value is not an object or not an `ArrayBuffer`.
   @JavaScriptActor
   public func asArrayBuffer() throws(TypeError) -> JavaScriptArrayBuffer {
-    let object = try asObject()
-    guard object.isArrayBuffer() else {
+    guard isArrayBuffer() else {
       throw TypeError(type: JavaScriptArrayBuffer.self)
     }
-    return object.getArrayBuffer()
+    return getArrayBuffer()
   }
 
   // MARK: - Serializing
