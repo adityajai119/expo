@@ -4,7 +4,6 @@
 
 #ifdef __cplusplus
 
-#include <cstdlib>
 #include <cstring>
 #include <new>
 #include <TargetConditionals.h>
@@ -500,7 +499,7 @@ inline bool isTypedArrayValue([[maybe_unused]] jsi::IRuntime &runtime, [[maybe_u
     return false;
   }
 #else
-  std::abort();
+  abortUnsupportedRNVersion(__func__);
 #endif
 }
 
@@ -522,7 +521,7 @@ inline TypedArrayProperties getNativeTypedArrayProperties(
     runtime.length(*ta),
   };
 #else
-  std::abort();
+  abortUnsupportedRNVersion(__func__);
 #endif
 }
 
@@ -539,7 +538,7 @@ inline jsi::ArrayBuffer getNativeTypedArrayBuffer(
   const jsi::TypedArray *ta = new (storage) jsi::TypedArray(PointerValueAccess::borrowTypedArray(jsObj));
   return runtime.buffer(*ta);
 #else
-  std::abort();
+  abortUnsupportedRNVersion(__func__);
 #endif
 }
 
@@ -581,7 +580,7 @@ inline bool withUint8ArrayBytes(
     return false;
   }
 #else
-  std::abort();
+  abortUnsupportedRNVersion(__func__);
 #endif
 }
 
@@ -708,7 +707,7 @@ inline jsi::Value createNativeSmallUint8Array(
     return jsi::Value(std::move(array));
   });
 #else
-  std::abort();
+  abortUnsupportedRNVersion(__func__);
 #endif
 }
 
